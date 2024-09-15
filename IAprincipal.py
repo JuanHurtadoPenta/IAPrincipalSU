@@ -1,10 +1,14 @@
 from openai import OpenAI
-from dotenv import load_dotenv
 import os
 import json
-load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")
-from openai import OpenAI
+import Mongodb
+from dotenv import load_dotenv, find_dotenv
+import os
+import ConsumirServicios
+
+env_path = find_dotenv()
+load_dotenv(env_path)
+
 def CrearAsistente():
     assistant = client.beta.assistants.create(
     instructions="""
@@ -12,6 +16,7 @@ You are the web assistant for Seguros Unidos, an expert in providing accurate an
 DO NOT request information unless it is REQUIRED as a parameter for a specific function. Only ask for input if it is NECESSARY for executing a function that depends on that information.
 
 You will only call the function "Obtener_informacion" if all required arguments are provided by the user. Ensure that all necessary arguments for using the function are given. If any arguments are missing, politely prompt the user to supply the missing information and do not execute the function until everything is complete.
+You will only call the function "realizar_reclamo" if all required arguments are provided by the user. Ensure that all necessary arguments for using the function are given. If any arguments are missing, politely prompt the user to supply the missing information and do not execute the function until everything is complete.
 Follow these rules when responding:
 
 1)Always be polite and make sure you clearly understand the purpose of the customer’s question.
@@ -39,6 +44,35 @@ Follow these rules when responding:
                         "required": ["Query"]
                     }
                 }
+            },
+            {
+            "type": "function",
+            "function": {
+                "name": "realizar_reclamo",
+                "description": "Esta función permite al cliente realizar un reclamo, queja o sugerencia (PQR). Recoge los datos del cliente y el asunto del reclamo.",
+                "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                    "type": "string",
+                    "description": "Nombre del cliente."
+                    },
+                    "apellido": {
+                    "type": "string",
+                    "description": "Apellido del cliente."
+                    },
+                    "celular": {
+                    "type": "string",
+                    "description": "Número de celular de contacto del cliente."
+                    },
+                    "asunto": {
+                    "type": "string",
+                    "description": "El asunto del reclamo o queja."
+                    }
+                },
+                "required": ["nombre", "apellido", "celular", "asunto"]
+                }
+            }
             }
         ]
     )
@@ -74,7 +108,7 @@ def consultar_api(query):
 
 ###################################################
 client = OpenAI()
-def IAprincipal(Input,assistantID=None,threadID=None):
+def IAprincipal(Input,codigo_emp,codigo_cliente,assistantID=None,threadID=None):
     if assistantID is None:
         assistant = CrearAsistente()
         assistant_id = assistant.id  # Asigna el ID del asistente creado
@@ -84,6 +118,7 @@ def IAprincipal(Input,assistantID=None,threadID=None):
     if threadID is None:
         thread = CrearHilo()
         thread_id = thread.id  # Asigna el ID del hilo creado
+        Mongodb.agregar_item(codigo_emp,codigo_cliente,thread_id,assistant_id)
     else:
         thread_id=threadID
     consulta=Input
@@ -117,8 +152,8 @@ def IAprincipal(Input,assistantID=None,threadID=None):
         messages = client.beta.threads.messages.list(
         thread_id
         )
-        for each in messages:
-            print(each)
+        #for each in messages:
+           # print(each)
 
     
     # Define the list to store tool outputs
@@ -152,6 +187,34 @@ def IAprincipal(Input,assistantID=None,threadID=None):
                 "tool_call_id": tool.id,
                 "output": response_text
                 })
+            elif tool.function.name == "realizar_reclamo":
+                data=tool.function.arguments
+                data_dict = json.loads(data)
+
+                #print(query_text)
+                if data_dict['nombre']=="" or data_dict['apellido']==""or data_dict['celular']=="" or data_dict['asunto']=="":
+                    tool_outputs.append({
+                    "tool_call_id": tool.id,
+                    "output": "Para poderte ayudarte  por favor necesitamos nos des tus nombres Completos,celular de contacto y el asunto. "
+                    })
+                else:
+                    enviar= {
+                    "bot_code": 3,
+                    "client_code":codigo_cliente,
+                    "flow_code": 2,
+                    "client": {
+                        "cli_crm_name":data_dict['nombre'],
+                        "cli_crm_lastname": data_dict['apellido'],
+                        "cli_crm_phone": data_dict['celular'],
+                        "cli_crm_pqr_subject": data_dict['asunto']
+                        }
+                    }
+                    respuesta=ConsumirServicios.Servicio_pqrs(enviar)
+                    #print(respuesta)
+                    tool_outputs.append({
+                    "tool_call_id": tool.id,
+                    "output": "Hemos procedido a realizar tu reclamo ,en breve uno de nuestros agentes se comunicara contigo."
+                    })
             
     
     # Submit all tool outputs at once after collecting them in a list
@@ -185,8 +248,15 @@ def IAprincipal(Input,assistantID=None,threadID=None):
                 break  # Sale del bucle después del primer 'assistant'"""
     else:
         print(run.status)
-def mainIAPrincipal(Input,asistente=None,hilo=None):
+def mainIAPrincipal(Input,codigo_emp, codigo_cliente):
+    asistente,hilo= Mongodb.obtener_hilo_y_asistente( codigo_emp, codigo_cliente)
+    print(asistente,hilo)
     if hilo  is None  and asistente is None:
-        return(IAprincipal(Input))
+        return(IAprincipal(Input,codigo_emp, codigo_cliente))
+    elif hilo=="Ninguno" and  asistente=="Ninguno":
+        return("Lamentamos los inconvenientes. Estamos experimentando problemas internos. Por favor, intenta contactarnos nuevamente en unos momentos. Agradecemos tu paciencia y comprensión")
+        
     else:
-        return(IAprincipal(Input,asistente,hilo))
+        return(IAprincipal(Input,None,None,asistente,hilo))
+
+#print(mainIAPrincipal("quiero saber que seguros ofrecen ","1","5"))
