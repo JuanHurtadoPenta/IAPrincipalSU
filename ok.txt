@@ -1,0 +1,1 @@
+[{'role': 'assistant', 'content': '🔹 El valor del pasivo corriente de la empresa Honda para febrero de 2023 es de -$1,269,641.47 (saldo mensual).\n\n👉 ¿Hay algo más en lo que pueda ayudarte hoy?'}]
